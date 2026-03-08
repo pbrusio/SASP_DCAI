@@ -1,0 +1,182 @@
+<dashboard version="1.1">
+  <label>SASP - Detection Feed</label>
+  <description>Real-time detection feed from the SASP security pipeline — what fired, why, and what the agents decided</description>
+
+  <fieldset submitButton="false" autoRun="true">
+    <input type="dropdown" token="model_filter">
+      <label>Model</label>
+      <choice value="*">All Models</choice>
+      <choice value="ise-dfp">ISE DFP</choice>
+      <choice value="netflow-anomaly">NetFlow Anomaly</choice>
+      <choice value="abp-nvsmi">ABP GPU</choice>
+      <choice value="sid-minibert">SID PII</choice>
+      <default>*</default>
+    </input>
+    <input type="dropdown" token="triage_filter">
+      <label>Triage</label>
+      <choice value="*">All</choice>
+      <choice value="investigate">Investigate</choice>
+      <choice value="escalate">Escalate</choice>
+      <choice value="skip">Skip</choice>
+      <default>*</default>
+    </input>
+  </fieldset>
+
+  <!-- Row 1: KPI Strip -->
+  <row>
+    <panel>
+      <title>Total Detections (24h)</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="$model_filter$" triage_decision="$triage_filter$" earliest=-24h@h latest=now | stats count</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[50,200]</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Critical + High (24h)</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="$model_filter$" triage_decision="$triage_filter$" (severity="critical" OR severity="high") earliest=-24h@h latest=now | stats count</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[5,20]</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Investigated (24h)</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="$model_filter$" triage_decision="investigate" earliest=-24h@h latest=now | stats count</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[10,50]</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Models Active (24h)</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation earliest=-24h@h latest=now | stats dc(model_name) AS models | fields models</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </single>
+    </panel>
+  </row>
+
+  <!-- Row 2: Timeline -->
+  <row>
+    <panel>
+      <title>Detections Over Time by Model</title>
+      <chart>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="$model_filter$" triage_decision="$triage_filter$" | timechart count by model_name</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Detections</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 3: Triage Breakdown + Severity Breakdown + Top Features -->
+  <row>
+    <panel>
+      <title>Triage Decisions</title>
+      <chart>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="$model_filter$" triage_decision="$triage_filter$" earliest=-24h@h latest=now | stats count by triage_decision</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Severity Distribution</title>
+      <chart>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="$model_filter$" triage_decision="$triage_filter$" earliest=-24h@h latest=now | stats count by severity</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Top Feature Drivers</title>
+      <chart>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="$model_filter$" triage_decision="$triage_filter$" top_features=* top_features!="null" earliest=-24h@h latest=now
+| rex field=top_features max_match=3 "(?&lt;feature&gt;\w+)\s*\("
+| mvexpand feature
+| stats count by feature
+| sort - count
+| head 10</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleX.text">Feature</option>
+        <option name="charting.axisTitleY.text">Times as Top Driver</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 4: Recent Detections Feed -->
+  <row>
+    <panel>
+      <title>Recent Detections</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="$model_filter$" triage_decision="$triage_filter$" earliest=-24h@h latest=now
+| sort - _time
+| eval summary=substr(report_summary, 1, 120)
+| table _time investigation_id model_name username source_ip severity score top_features triage_decision summary
+| rename _time AS "Time", investigation_id AS "Investigation", model_name AS "Model", username AS "User", source_ip AS "Source IP", severity AS "Severity", score AS "Score", top_features AS "Why It Fired", triage_decision AS "Triage", summary AS "Agent Summary"
+| head 50</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">row</option>
+        <option name="count">20</option>
+        <option name="wrap">true</option>
+        <drilldown>
+          <link target="_blank">/app/search/investigations?form.investigation_id=$row.Investigation$</link>
+        </drilldown>
+        <format type="color" field="Severity">
+          <colorPalette type="map">{"critical":#DC4E41,"high":#F1813F,"medium":#F8BE34,"low":#53A051,"unknown":#006D9C}</colorPalette>
+        </format>
+        <format type="color" field="Triage">
+          <colorPalette type="map">{"investigate":#F1813F,"skip":#53A051,"escalate":#DC4E41}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+</dashboard>

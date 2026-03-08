@@ -1,0 +1,130 @@
+<dashboard version="1.1">
+  <label>SASP - AI System Health</label>
+  <description>Health and performance monitoring for SASP AI agents, guardian, and Ollama endpoints</description>
+
+  <!-- Row 1: Agent response time stats -->
+  <row>
+    <panel>
+      <title>Agent Avg Response Time (ms)</title>
+      <table>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:agent_metrics
+| stats avg(response_time_ms) AS avg_ms p95(response_time_ms) AS p95_ms p99(response_time_ms) AS p99_ms by agent_name
+| eval avg_ms=round(avg_ms,1), p95_ms=round(p95_ms,1), p99_ms=round(p99_ms,1)
+| rename agent_name AS "Agent", avg_ms AS "Avg (ms)", p95_ms AS "P95 (ms)", p99_ms AS "P99 (ms)"</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 2: Guardian approval/rejection + tool call success -->
+  <row>
+    <panel>
+      <title>Guardian Approval / Rejection Rate</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:agent_metrics agent_name=guardian
+| stats count by validation_result
+| rename validation_result AS "Result"</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Tool Call Success Rate</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:agent_metrics event_type=tool_call
+| stats count(eval(status="success")) AS success count(eval(status="failure")) AS failure by tool_name
+| eval success_rate=round((success/(success+failure))*100,1)
+| table tool_name success failure success_rate
+| rename tool_name AS "Tool", success AS "Success", failure AS "Failure", success_rate AS "Success Rate %"</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 3: Ollama endpoint health + agent error rate -->
+  <row>
+    <panel>
+      <title>Ollama Endpoint Response Time</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:agent_metrics event_type=ollama_health
+| timechart avg(response_time_ms) AS avg_response_ms by endpoint</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Response Time (ms)</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Agent Error Rate</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:agent_metrics status=error
+| timechart count by agent_name</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Error Count</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 4: Pending human approvals -->
+  <row>
+    <panel>
+      <title>Pending Human Approvals</title>
+      <single>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:agent_metrics event_type=human_approval status=pending
+| stats count</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[5,20]</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Pending Approvals Detail</title>
+      <table>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:agent_metrics event_type=human_approval status=pending
+| table _time investigation_id agent_name action_requested risk_level
+| sort - _time
+| rename investigation_id AS "Investigation", agent_name AS "Agent", action_requested AS "Action", risk_level AS "Risk Level"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+        <format type="color" field="Risk Level">
+          <colorPalette type="map">{"critical":#DC4E41,"high":#F1813F,"medium":#F8BE34,"low":#53A051}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+</dashboard>

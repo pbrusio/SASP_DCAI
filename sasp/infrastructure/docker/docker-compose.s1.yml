@@ -1,0 +1,82 @@
+# SASP Server 1 (C220 M5) - Inference
+# <S1_IP>
+
+version: '3.8'
+
+services:
+  # Triton Inference Server
+  triton:
+    image: nvcr.io/nvidia/tritonserver:24.01-py3
+    container_name: triton
+    runtime: nvidia
+    ports:
+      - "8000:8000"   # HTTP
+      - "8001:8001"   # gRPC
+      - "8002:8002"   # Metrics
+    volumes:
+      - /mnt/storage1/models:/models:ro
+    command: >
+      tritonserver
+      --model-repository=/models
+      --strict-model-config=false
+      --log-verbose=1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Morpheus runtime
+  morpheus:
+    image: nvcr.io/nvidia/morpheus/morpheus:24.10-runtime
+    container_name: morpheus
+    runtime: nvidia
+    depends_on:
+      triton:
+        condition: service_healthy
+    volumes:
+      - /mnt/storage1/morpheus/workspace:/workspace
+      - ./configs/morpheus:/configs:ro
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - KAFKA_BOOTSTRAP_SERVERS=<S2_IP>:9092
+      - TRITON_SERVER_URL=triton:8001
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    # Command will be set based on pipeline config
+    # command: morpheus run pipeline-nlp --config /configs/detection_pipeline.yaml
+
+  # Splunk forwarder
+  splunk-forwarder:
+    image: python:3.11-slim
+    container_name: splunk-forwarder
+    volumes:
+      - ./scripts/splunk_forwarder.py:/app/forwarder.py:ro
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=<S2_IP>:9092
+      - KAFKA_TOPICS=morpheus-detections
+      - SPLUNK_HEC_URL=https://<SPLUNK_IP>:8088/services/collector/event
+      - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN}
+    command: >
+      sh -c "pip install kafka-python requests && python /app/forwarder.py"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: sasp-network

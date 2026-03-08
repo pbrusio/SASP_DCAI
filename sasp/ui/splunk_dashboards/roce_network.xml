@@ -1,0 +1,245 @@
+<dashboard version="1.1">
+  <label>SASP - RoCE Network Health</label>
+  <description>N9K RoCE fabric port metrics: throughput, errors, drops, and PFC watchdog for NCCL/RDMA training</description>
+
+  <!-- Row 1: Current throughput gauges + PFC -->
+  <row>
+    <panel>
+      <title>S1 RoCE Port (Eth1/44) — Current Throughput</title>
+      <single>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics port="Eth1/44"
+| stats latest(in_bps) AS in_bps latest(out_bps) AS out_bps
+| eval throughput_gbps=round((in_bps + out_bps) / 1000000000, 2)
+| fields throughput_gbps</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x65a637","0x6db7c6","0xf7bc38","0xf58f39","0xd93f3c"]</option>
+        <option name="rangeValues">[5,10,15,20]</option>
+        <option name="numberPrecision">0.00</option>
+        <option name="unit"> Gbps</option>
+        <option name="underLabel">S1 (Inference)</option>
+      </single>
+    </panel>
+    <panel>
+      <title>S2 RoCE Port (Eth1/38) — Current Throughput</title>
+      <single>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics port="Eth1/38"
+| stats latest(in_bps) AS in_bps latest(out_bps) AS out_bps
+| eval throughput_gbps=round((in_bps + out_bps) / 1000000000, 2)
+| fields throughput_gbps</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x65a637","0x6db7c6","0xf7bc38","0xf58f39","0xd93f3c"]</option>
+        <option name="rangeValues">[5,10,15,20]</option>
+        <option name="numberPrecision">0.00</option>
+        <option name="unit"> Gbps</option>
+        <option name="underLabel">S2 (Training)</option>
+      </single>
+    </panel>
+    <panel>
+      <title>PFC Status</title>
+      <table>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics
+| stats latest(pfc_mode) AS mode latest(pfc_rx_pause) AS rx_pause latest(pfc_tx_pause) AS tx_pause latest(pfc_watchdog) AS watchdog by port port_label
+| rename port AS "Port", port_label AS "Server", mode AS "PFC", rx_pause AS "Rx Pause", tx_pause AS "Tx Pause", watchdog AS "Watchdog"</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+        <format type="color" field="PFC">
+          <colorPalette type="map">{"On":#53A051,"Off":#DC4E41,"unknown":#999999}</colorPalette>
+        </format>
+        <format type="color" field="Watchdog">
+          <colorPalette type="map">{"Disabled":#65A637,"Enabled":#F8BE34,"unknown":#999999}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 2: Throughput over time -->
+  <row>
+    <panel>
+      <title>RoCE Port Throughput Over Time (bps)</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics
+| timechart avg(in_bps) AS "Inbound" avg(out_bps) AS "Outbound" by port_label</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Bits per Second</option>
+        <option name="charting.chart.stackMode">default</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 3: PFC pause frames over time (key indicator for RoCE congestion) -->
+  <row>
+    <panel>
+      <title>PFC Pause Frames Over Time (Rx + Tx)</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics
+| sort 0 _time
+| streamstats current=f last(pfc_rx_pause) AS prev_rx last(pfc_tx_pause) AS prev_tx last(_time) AS prev_time by port
+| eval interval=_time-prev_time
+| where interval>0 AND isnotnull(prev_rx)
+| eval new_rx_pause=pfc_rx_pause-prev_rx, new_tx_pause=pfc_tx_pause-prev_tx
+| timechart sum(new_rx_pause) AS "Rx Pause" sum(new_tx_pause) AS "Tx Pause" by port_label</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Pause Frames (new)</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 4: Packet rate + Link utilization -->
+  <row>
+    <panel>
+      <title>Packet Rate (pps)</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics
+| sort 0 _time
+| streamstats current=f last(in_ucast_pkts) AS prev_in last(out_ucast_pkts) AS prev_out last(_time) AS prev_time by port
+| eval interval=_time-prev_time
+| where interval>0 AND isnotnull(prev_in)
+| eval in_pps=round((in_ucast_pkts-prev_in)/interval, 0), out_pps=round((out_ucast_pkts-prev_out)/interval, 0)
+| timechart avg(in_pps) AS "Rx pps" avg(out_pps) AS "Tx pps" by port_label</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Packets / sec</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Link Utilization (% of 25G)</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics
+| eval link_speed=25000000000
+| eval util_in=round(in_bps/link_speed*100, 3), util_out=round(out_bps/link_speed*100, 3)
+| timechart avg(util_in) AS "Rx Util %" avg(util_out) AS "Tx Util %" by port_label</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Utilization %</option>
+        <option name="charting.axisTitleY.visibility">visible</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 4: Errors and drops -->
+  <row>
+    <panel>
+      <title>Interface Errors (delta per interval)</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics
+| sort 0 _time
+| streamstats current=f last(in_errors) AS prev_err last(out_discards) AS prev_disc by port
+| where isnotnull(prev_err)
+| eval new_errors=in_errors-prev_err, new_discards=out_discards-prev_disc
+| timechart sum(new_errors) AS "New Rx Errors" sum(new_discards) AS "New Tx Discards" by port_label</query>
+          <earliest>-4h@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Count (new)</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Port Summary</title>
+      <table>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics
+| stats latest(in_bps) AS in_bps latest(out_bps) AS out_bps latest(in_errors) AS rx_errors latest(out_discards) AS tx_discards latest(in_octets) AS total_rx latest(out_octets) AS total_tx by port port_label
+| eval link_speed=25000000000
+| eval util_pct=round((in_bps+out_bps)/link_speed*100, 2)
+| eval total_rx_gb=round(total_rx/1073741824, 1), total_tx_gb=round(total_tx/1073741824, 1)
+| rename port AS "Port", port_label AS "Server", util_pct AS "Link Util %", total_rx_gb AS "Lifetime Rx (GB)", total_tx_gb AS "Lifetime Tx (GB)", rx_errors AS "Rx Errors", tx_discards AS "Tx Discards"
+| fields "Port", "Server", "Link Util %", "Lifetime Rx (GB)", "Lifetime Tx (GB)", "Rx Errors", "Tx Discards"</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+        <format type="color" field="Rx Errors">
+          <colorPalette type="map">{"0":#53A051}</colorPalette>
+        </format>
+        <format type="color" field="Tx Discards">
+          <colorPalette type="map">{"0":#53A051}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 5: Current link utilization gauges (big visual during NCCL training) -->
+  <row>
+    <panel>
+      <title>S1 Link Utilization</title>
+      <single>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics port="Eth1/44"
+| stats latest(in_bps) AS in_bps latest(out_bps) AS out_bps
+| eval util=round((in_bps+out_bps)/25000000000*100, 1)
+| fields util</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0x6db7c6","0xf7bc38","0xf58f39","0xd93f3c"]</option>
+        <option name="rangeValues">[25,50,75,90]</option>
+        <option name="numberPrecision">0.0</option>
+        <option name="unit">%</option>
+        <option name="underLabel">S1 (Inference) — 25G</option>
+      </single>
+    </panel>
+    <panel>
+      <title>S2 Link Utilization</title>
+      <single>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:switch_metrics port="Eth1/38"
+| stats latest(in_bps) AS in_bps latest(out_bps) AS out_bps
+| eval util=round((in_bps+out_bps)/25000000000*100, 1)
+| fields util</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0x6db7c6","0xf7bc38","0xf58f39","0xd93f3c"]</option>
+        <option name="rangeValues">[25,50,75,90]</option>
+        <option name="numberPrecision">0.0</option>
+        <option name="unit">%</option>
+        <option name="underLabel">S2 (Training) — 25G</option>
+      </single>
+    </panel>
+  </row>
+</dashboard>

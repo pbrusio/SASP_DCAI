@@ -1,0 +1,24 @@
+name: "sid-minibert"
+platform: "onnxruntime_onnx"
+max_batch_size: 32
+
+input [
+    {
+        name: "input_ids"
+        data_type: TYPE_INT32
+        dims: [ 256 ]
+    },
+    {
+        name: "attention_mask"
+        data_type: TYPE_INT32
+        dims: [ 256 ]
+    }
+]
+
+output [{
+    name: "output"
+    data_type: TYPE_FP32
+    dims: [ 10 ]
+}]
+
+instance_group [{ count: 1, kind: KIND_GPU, gpus: [ 0 ] }]

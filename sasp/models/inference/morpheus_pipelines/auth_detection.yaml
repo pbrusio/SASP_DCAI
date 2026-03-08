@@ -1,0 +1,96 @@
+# SASP Morpheus Pipeline — Auth Risk Classification
+# Reads sanitized ISE auth events from Kafka, runs through Triton classifier,
+# labels events as normal/suspicious/malicious, publishes detections.
+
+pipeline:
+  name: auth_detection
+  description: "ISE authentication risk classification"
+
+  # --- Source: Kafka consumer ---
+  source:
+    type: from-kafka
+    properties:
+      bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:-<S2_IP>:9092}
+      input_topic: ise-sanitized
+      group_id: morpheus-auth-detection
+      auto_offset_reset: latest
+      poll_interval: 100ms
+
+  stages:
+    # --- Deserialize JSON messages ---
+    - type: deserialize
+      properties:
+        message_type: json
+        schema:
+          username: string
+          nas_ip: string
+          calling_station_id: string
+          called_station_id: string
+          auth_result: string
+          policy_set: string
+          timestamp: string
+
+    # --- Feature extraction ---
+    - type: preprocess
+      properties:
+        module: sasp.models.training.auth_classifier
+        scaler_path: /mnt/storage1/models/auth-risk/auth_classifier_scaler.pkl
+        feature_columns:
+          - hour_of_day
+          - day_of_week
+          - auth_result_code
+          - consecutive_failures
+          - unique_nas_count_24h
+          - location_change_flag
+          - new_device_flag
+
+    # --- Triton inference ---
+    - type: inf-triton
+      properties:
+        model_name: auth-risk
+        server_url: ${TRITON_SERVER_URL:-<S1_IP>:8001}
+        input_name: input
+        output_name: output
+        use_shared_memory: true
+
+    # --- Classification labeling ---
+    - type: add-class
+      properties:
+        label_map:
+          0: normal
+          1: suspicious
+          2: malicious
+        score_column: risk_score
+        label_column: risk_label
+        detection_type: auth_risk
+        model_name: auth-risk
+        model_version: 1
+
+    # --- Filter: only emit suspicious or malicious ---
+    - type: filter
+      properties:
+        column: risk_label
+        value: normal
+        operator: ne
+
+    # --- Serialize output ---
+    - type: serialize
+      properties:
+        message_type: json
+        include_columns:
+          - username
+          - nas_ip
+          - calling_station_id
+          - auth_result
+          - risk_score
+          - risk_label
+          - detection_type
+          - model_name
+          - timestamp
+
+  # --- Sink: Kafka producer ---
+  sink:
+    type: to-kafka
+    properties:
+      bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:-<S2_IP>:9092}
+      output_topic: morpheus-detections

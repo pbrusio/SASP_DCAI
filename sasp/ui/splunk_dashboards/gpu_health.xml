@@ -1,0 +1,133 @@
+<dashboard version="1.1">
+  <label>SASP - GPU Infrastructure Health</label>
+  <description>GPU utilization, memory, temperature, and Triton inference metrics for SASP infrastructure</description>
+
+  <!-- Row 1: GPU utilization gauges -->
+  <row>
+    <panel>
+      <title>S1 GPU Utilization (%)</title>
+      <single>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:gpu_metrics host=t4server1*
+| stats latest(gpu_utilization_pct) AS utilization</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xf1813f","0xdc4e41"]</option>
+        <option name="rangeValues">[60,80,95]</option>
+        <option name="numberPrecision">0.0</option>
+        <option name="unit">%</option>
+      </single>
+    </panel>
+    <panel>
+      <title>S2 GPU Utilization (%)</title>
+      <single>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:gpu_metrics host=t4server2*
+| stats latest(gpu_utilization_pct) AS utilization</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xf1813f","0xdc4e41"]</option>
+        <option name="rangeValues">[60,80,95]</option>
+        <option name="numberPrecision">0.0</option>
+        <option name="unit">%</option>
+      </single>
+    </panel>
+  </row>
+
+  <!-- Row 2: GPU memory + temperature timecharts -->
+  <row>
+    <panel>
+      <title>GPU Memory Usage Over Time</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:gpu_metrics
+| timechart avg(gpu_memory_used_mb) AS used avg(gpu_memory_total_mb) AS total by host</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Memory (MB)</option>
+        <option name="charting.chart.stackMode">default</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>GPU Temperature Over Time</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:gpu_metrics
+| timechart avg(gpu_temp_c) by host</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Temperature (C)</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 3: Triton inference throughput + latency -->
+  <row>
+    <panel>
+      <title>Triton Inference Throughput (req/sec)</title>
+      <chart>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:gpu_metrics event_type=triton_inference
+| timechart avg(requests_per_sec) AS "Requests/sec" by model_name</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Requests / sec</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Triton Inference Latency</title>
+      <table>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:gpu_metrics event_type=triton_inference
+| stats p50(latency_ms) AS p50_ms p95(latency_ms) AS p95_ms p99(latency_ms) AS p99_ms by model_name
+| eval p50_ms=round(p50_ms,1), p95_ms=round(p95_ms,1), p99_ms=round(p99_ms,1)
+| rename model_name AS "Model", p50_ms AS "P50 (ms)", p95_ms AS "P95 (ms)", p99_ms AS "P99 (ms)"</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 4: Model version info -->
+  <row>
+    <panel>
+      <title>Model Version Info</title>
+      <table>
+        <search>
+          <query>index=sasp_metrics sourcetype=sasp:gpu_metrics event_type=model_info
+| stats latest(model_version) AS version latest(model_status) AS status latest(_time) AS last_seen by model_name host
+| convert ctime(last_seen)
+| rename model_name AS "Model", model_version AS "Version", model_status AS "Status", host AS "Host", last_seen AS "Last Seen"</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+        <format type="color" field="Status">
+          <colorPalette type="map">{"READY":#53A051,"LOADING":#F8BE34,"UNAVAILABLE":#DC4E41}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+</dashboard>

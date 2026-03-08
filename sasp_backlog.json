@@ -1,0 +1,598 @@
+[
+  {
+    "story": "SASP-001",
+    "category": "setup",
+    "description": "Create pyproject.toml with project metadata and all dependencies (langgraph, pydantic, kafka-python, requests, ollama, pytest, torch, onnx, tritonclient, morpheus-utils). Include optional dependency groups: [dev] for pytest/ruff/mypy, [ml] for torch/onnx/sklearn, [agents] for langgraph/ollama. Add script entry points for the sanitizer Kafka service and the agent runner.",
+    "steps": [
+      "Create sasp/pyproject.toml with [project] metadata (name=sasp, version=0.1.0, python>=3.10)",
+      "Add core dependencies: pydantic>=2.0, kafka-python>=2.0.2, requests>=2.31, python-dotenv>=1.0",
+      "Add [project.optional-dependencies] dev = pytest, ruff, mypy, pytest-cov",
+      "Add [project.optional-dependencies] ml = torch>=2.1, onnx>=1.14, scikit-learn, pandas, numpy",
+      "Add [project.optional-dependencies] agents = langgraph>=0.0.40, ollama>=0.1, langchain-core",
+      "Add [project.scripts] entry points: sasp-sanitizer, sasp-agent-runner, sasp-health",
+      "Add [tool.pytest.ini_options] with testpaths and markers",
+      "Add [tool.ruff] config with line-length=100 and select rules",
+      "Verify install with pip install -e '.[dev,ml,agents]' on a test environment"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-002",
+    "category": "setup",
+    "description": "Create .env.example template documenting every environment variable the platform needs, organized by component. This serves as the single source of truth for deployment configuration across both UCS servers, the RTX 5080 workstation, and the Mac Studio.",
+    "steps": [
+      "Create sasp/infrastructure/docker/.env.example with sections for each component",
+      "Add Kafka variables: KAFKA_BOOTSTRAP_SERVERS, KAFKA_NUM_PARTITIONS, KAFKA_LOG_RETENTION_HOURS",
+      "Add Splunk variables: SPLUNK_HEC_URL, SPLUNK_HEC_TOKEN, SPLUNK_INDEX",
+      "Add Triton variables: TRITON_SERVER_URL, TRITON_HTTP_PORT, TRITON_GRPC_PORT",
+      "Add LLM variables: OLLAMA_ENDPOINT_FAST (5080), OLLAMA_ENDPOINT_HEAVY (Mac Studio), OLLAMA_MODEL_TRIAGE, OLLAMA_MODEL_INVESTIGATE, OLLAMA_MODEL_THREAT_INTEL, OLLAMA_MODEL_REPORT",
+      "Add Sanitizer variables: SANITIZER_STRICT_MODE, SANITIZER_LOG_ORIGINALS, SANITIZER_INPUT_TOPICS, SANITIZER_OUTPUT_SUFFIX",
+      "Add Network variables: SERVER1_IP, SERVER2_IP, RDMA_SUBNET",
+      "Add a comment header explaining which vars are required vs optional",
+      "Add .env.example to git tracking (ensure .env itself stays in .gitignore)"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-003",
+    "category": "setup",
+    "description": "Create the missing infrastructure configuration files that docker-compose.s2.yml and docker-compose.s1.yml reference but do not exist: syslog-ng.conf for the syslog container, and splunk_forwarder.py for the Splunk HEC bridge container.",
+    "steps": [
+      "Create sasp/infrastructure/docker/configs/syslog-ng.conf with UDP/TCP source on port 514",
+      "Configure syslog-ng to parse RFC5424 and RFC3164 formats",
+      "Add syslog-ng destination that writes to /var/log/syslog-raw/ with daily rotation",
+      "Add syslog-ng destination that forwards to Kafka topic 'syslog-raw' using the kafka() driver or a pipe to kafkacat",
+      "Create sasp/infrastructure/docker/scripts/splunk_forwarder.py based on the pattern in Morpheus_Deployment_Details.md",
+      "Implement KafkaConsumer reading from configurable KAFKA_TOPICS (comma-separated)",
+      "Implement Splunk HEC POST with retry logic, batch buffering (100 events or 5s), and TLS verify toggle",
+      "Add structured logging and health endpoint (simple HTTP /health on port 9090)",
+      "Test that docker-compose.s1.yml and docker-compose.s2.yml can start without missing volume mount errors"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-004",
+    "category": "setup",
+    "description": "Create the Python package directory structure with __init__.py files for all planned subpackages. This establishes the import hierarchy that graph.py and future modules depend on without implementing any logic yet.",
+    "steps": [
+      "Create sasp/agents/nodes/__init__.py with placeholder docstring",
+      "Create sasp/agents/tools/__init__.py with placeholder docstring",
+      "Create sasp/agents/security/__init__.py with placeholder docstring",
+      "Create sasp/agents/security/prompt_templates/ directory (empty, for .txt files)",
+      "Create sasp/models/__init__.py, sasp/models/training/__init__.py, sasp/models/inference/__init__.py, sasp/models/evaluation/__init__.py",
+      "Create sasp/ui/__init__.py",
+      "Create sasp/tests/__init__.py, sasp/tests/unit/__init__.py, sasp/tests/integration/__init__.py, sasp/tests/adversarial/__init__.py",
+      "Verify that 'from sasp.agents import state' and 'from sasp.sanitizer import patterns' work after creating the structure"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-005",
+    "category": "data-layer",
+    "description": "Build the Kafka consumer bridge that reads detection events from Morpheus output topics and feeds them into the LangGraph investigation workflow. This is the glue between the GPU detection layer and the LLM reasoning layer.",
+    "steps": [
+      "Create sasp/agents/kafka_bridge.py with a KafkaDetectionConsumer class",
+      "Accept configuration via environment variables: KAFKA_BOOTSTRAP_SERVERS, KAFKA_DETECTION_TOPIC (default: morpheus-detections), KAFKA_CONSUMER_GROUP",
+      "Implement consume loop using kafka-python KafkaConsumer with JSON deserialization",
+      "Parse each message into the detection dict format expected by InvestigationState",
+      "Call run_investigation(detection) from graph.py for each detection (when graph.py is functional; for now, log the parsed detection)",
+      "Implement graceful shutdown on SIGTERM/SIGINT",
+      "Add dead-letter queue logic: if processing fails 3 times, produce to a 'detection-dlq' topic",
+      "Add prometheus-style metrics: detections_consumed_total, detections_processed_total, detections_failed_total (logged to stdout in JSON)",
+      "Create a __main__.py entry point so the bridge can run as 'python -m sasp.agents.kafka_bridge'"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-006",
+    "category": "data-layer",
+    "description": "Create the training data export utility that reads raw NetFlow and syslog data from Kafka topics, applies optional time-range filters, and writes Parquet files suitable for model training in Phase 3.",
+    "steps": [
+      "Create sasp/scripts/data/export_training_data.py",
+      "Accept CLI arguments: --topic, --bootstrap-servers, --output-dir, --start-time, --end-time, --max-records, --format (parquet or jsonlines)",
+      "Use KafkaConsumer with assign() to read from specific offsets based on timestamp",
+      "Convert messages to pandas DataFrame with proper column typing",
+      "For NetFlow data: extract src_ip, dst_ip, src_port, dst_port, protocol, bytes, packets, duration, flags",
+      "Write output as Parquet with snappy compression (default) or JSON lines",
+      "Add summary statistics: record count, time range, unique source IPs, top protocols",
+      "Add a --label flag for supervised data (e.g., --label=normal or --label=anomaly) that appends a label column"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-007",
+    "category": "sanitizer",
+    "description": "Complete the encode_special_chars TODO in base.py and implement the three data-source-specific sanitizer subclasses: NetFlowSanitizer, SyslogSanitizer, and ISESanitizer. Each must implement sanitize() and validate_schema() from BaseSanitizer.",
+    "steps": [
+      "Implement encode_special_chars in base.py: HTML-encode <>&'\" characters, strip null bytes, normalize unicode (NFKC), remove zero-width chars",
+      "Create sasp/sanitizer/netflow.py with NetFlowSanitizer(BaseSanitizer)",
+      "NetFlowSanitizer.validate_schema: check required GoFlow2 JSON fields (Type, SamplerAddress, SrcAddr, DstAddr, SrcPort, DstPort, Proto, Bytes, Packets)",
+      "NetFlowSanitizer.sanitize: validate IP addresses are valid (not spoofed to injection strings), clamp numeric fields to valid ranges, check string fields against injection patterns",
+      "Create sasp/sanitizer/syslog.py with SyslogSanitizer(BaseSanitizer)",
+      "SyslogSanitizer.validate_schema: check for timestamp, hostname, facility, severity, message fields",
+      "SyslogSanitizer.sanitize: truncate message field, run injection pattern checks on message content, encode special chars in hostname and message",
+      "Create sasp/sanitizer/ise.py with ISESanitizer(BaseSanitizer)",
+      "ISESanitizer.validate_schema: check for ISE RADIUS auth fields (username, nas_ip, calling_station_id, called_station_id, auth_result, policy_set)",
+      "ISESanitizer.sanitize: validate username format, check MAC address formats, run injection checks on username and policy fields, validate IP formats",
+      "Update sasp/sanitizer/__init__.py to export all three sanitizer classes"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-008",
+    "category": "sanitizer",
+    "description": "Build the Kafka-integrated sanitizer service that consumes raw topics (netflow-raw, syslog-raw, ise-raw), applies the appropriate sanitizer, and produces to sanitized output topics. This corresponds to the commented-out 'sanitizer' service in docker-compose.s2.yml.",
+    "steps": [
+      "Create sasp/sanitizer/service.py with a SanitizerService class",
+      "Map input topics to sanitizer classes: netflow-raw -> NetFlowSanitizer, syslog-raw -> SyslogSanitizer, ise-raw -> ISESanitizer",
+      "Accept config via environment: KAFKA_BOOTSTRAP_SERVERS, INPUT_TOPICS (comma-separated), OUTPUT_TOPIC_SUFFIX (default: -sanitized), STRICT_MODE",
+      "Consume from all input topics using a single KafkaConsumer with topic subscription",
+      "Route each message to the correct sanitizer based on its source topic",
+      "If sanitization passes (is_clean=True or strict_mode=False): produce to {topic}{suffix} via KafkaProducer",
+      "If sanitization fails in strict mode: produce to {topic}-rejected with the SanitizationResult as metadata",
+      "Log all SanitizationResult objects with threats_detected for forensic audit",
+      "Create a Dockerfile at sasp/sanitizer/Dockerfile (python:3.11-slim base, pip install the sasp package)",
+      "Uncomment and update the sanitizer service block in docker-compose.s2.yml to use the new Dockerfile"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-009",
+    "category": "testing",
+    "description": "Create the unit test suite for the sanitizer layer: test injection pattern detection, test each sanitizer subclass with both clean and malicious inputs, and test the encode_special_chars implementation.",
+    "steps": [
+      "Create sasp/tests/unit/test_patterns.py with tests for all 5 pattern categories",
+      "Test each of the 21 patterns with a positive match and a negative (benign) non-match",
+      "Test check_all_patterns with a compound string containing multiple injection types",
+      "Test get_patterns_by_category with valid and invalid category names",
+      "Create sasp/tests/unit/test_sanitizers.py",
+      "Test NetFlowSanitizer with valid GoFlow2 JSON, invalid schema, and injection in IP field",
+      "Test SyslogSanitizer with valid syslog, oversized message (truncation), and command injection in message",
+      "Test ISESanitizer with valid auth record, prompt injection in username, and SQL injection in policy field",
+      "Test encode_special_chars with HTML entities, null bytes, zero-width characters, and unicode normalization",
+      "Test SanitizationResult dataclass fields are correctly populated",
+      "Create sasp/tests/adversarial/test_injection.py with creative bypass attempts: unicode homoglyphs, base64-encoded payloads, multi-line injection, nested injection patterns",
+      "Ensure all tests can run with 'pytest sasp/tests/' from the project root"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-010",
+    "category": "detection",
+    "description": "Implement feature engineering for NetFlow data: transform raw GoFlow2 JSON records into numeric feature vectors suitable for autoencoder training. Include both per-flow features and aggregate (windowed) features.",
+    "steps": [
+      "Create sasp/models/training/feature_engineering.py",
+      "Implement NetFlowFeatureExtractor class with a transform(records: List[dict]) -> pd.DataFrame method",
+      "Per-flow features: bytes_per_packet, duration_seconds, src_port_category (well-known/registered/dynamic), dst_port_category, protocol_onehot",
+      "Add aggregate features with configurable window (default 5 min): flows_per_src_ip, unique_dst_ips_per_src, unique_dst_ports_per_src, bytes_out_vs_in_ratio",
+      "Implement IP entropy feature: Shannon entropy of destination IPs in the window (high entropy = scan behavior)",
+      "Normalize all numeric features using StandardScaler (fit on training data, save scaler params)",
+      "Save the fitted scaler as a pickle file alongside the training data",
+      "Create a CLI entry point: python -m sasp.models.training.feature_engineering --input netflow.parquet --output features.parquet",
+      "Add unit tests in sasp/tests/unit/test_feature_engineering.py with synthetic NetFlow data"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-011",
+    "category": "detection",
+    "description": "Train a NetFlow autoencoder model for anomaly detection. The autoencoder learns normal traffic patterns; high reconstruction error indicates anomalous flows. Use PyTorch and export to ONNX for Triton serving.",
+    "steps": [
+      "Create sasp/models/training/netflow_autoencoder.py",
+      "Define AutoEncoder nn.Module: encoder (input_dim -> 64 -> 32 -> 16), decoder (16 -> 32 -> 64 -> input_dim), ReLU activations, BatchNorm",
+      "Implement training loop with MSE reconstruction loss, Adam optimizer, learning rate scheduler",
+      "Add early stopping based on validation loss (patience=10 epochs)",
+      "Split data: 80% train, 10% validation, 10% test",
+      "Log training metrics: epoch, train_loss, val_loss, reconstruction_error distribution",
+      "After training, compute reconstruction error threshold on validation set (e.g., 95th or 99th percentile)",
+      "Save threshold alongside model weights",
+      "Export trained model to ONNX format using torch.onnx.export with dynamic batch axis",
+      "Add CLI entry point: python -m sasp.models.training.netflow_autoencoder --data features.parquet --output-dir models/ --epochs 100"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-012",
+    "category": "detection",
+    "description": "Train an authentication risk classifier using ISE RADIUS log data. This supervised model classifies auth events as normal, suspicious, or malicious based on features like time-of-day, location anomaly, and failure patterns.",
+    "steps": [
+      "Create sasp/models/training/auth_classifier.py",
+      "Define feature set: hour_of_day, day_of_week, auth_result_code, consecutive_failures, unique_nas_count_24h, location_change_flag, new_device_flag",
+      "Implement a simple feedforward classifier: input -> 128 -> 64 -> 3 (normal/suspicious/malicious), with dropout=0.3",
+      "Use CrossEntropyLoss with class weights to handle imbalanced data (most events are normal)",
+      "Implement stratified train/val/test split",
+      "Log classification report: precision, recall, F1 per class",
+      "Export to ONNX format with dynamic batch axis",
+      "Save label mapping and feature scaler alongside the model",
+      "Add CLI entry point: python -m sasp.models.training.auth_classifier --data auth_features.parquet --output-dir models/"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-013",
+    "category": "detection",
+    "description": "Create Triton model repository configurations and Morpheus pipeline YAML files so that the trained ONNX models can be served by Triton and consumed by Morpheus pipelines reading from Kafka.",
+    "steps": [
+      "Create sasp/models/inference/triton_configs/netflow-anomaly/config.pbtxt with ONNX backend, dynamic batching, input/output tensor specs matching the autoencoder",
+      "Create sasp/models/inference/triton_configs/auth-risk/config.pbtxt with ONNX backend for the auth classifier",
+      "Create placeholder model version directories: netflow-anomaly/1/model.onnx and auth-risk/1/model.onnx",
+      "Create sasp/models/inference/morpheus_pipelines/netflow_detection.yaml: from-kafka (netflow-sanitized) -> deserialize -> preprocess -> inf-triton (netflow-anomaly) -> add-class -> serialize -> to-kafka (netflow-detections)",
+      "Create sasp/models/inference/morpheus_pipelines/auth_detection.yaml: similar pipeline for auth-risk model",
+      "Document the deployment process: copy model files to /mnt/storage1/triton-models/, restart Triton, run Morpheus with --config flag",
+      "Add a deploy_models.sh script that copies ONNX files and configs to the correct Triton model repository paths"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-014",
+    "category": "detection",
+    "description": "Implement adversarial testing for the detection models: verify that models are robust against input perturbation, feature manipulation, and evasion techniques relevant to network security data.",
+    "steps": [
+      "Create sasp/models/evaluation/adversarial_tests.py",
+      "Implement feature perturbation attacks: add small noise to numeric features, measure detection rate degradation",
+      "Implement flow-splitting evasion: split one large anomalous flow into multiple small flows, check if autoencoder still flags",
+      "Implement port-hopping evasion: vary destination ports while keeping other anomalous features, measure recall",
+      "Implement slow-scan evasion: spread scan across long time window to dilute aggregate features",
+      "Create sasp/models/evaluation/metrics.py with ROC-AUC, precision-recall curves, and detection-at-FPR metrics",
+      "Generate an adversarial test report with pass/fail thresholds (e.g., detection rate must stay above 80% under perturbation)",
+      "Add pytest markers for adversarial tests so they can run separately: @pytest.mark.adversarial"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-015",
+    "category": "agents",
+    "description": "Implement the four agent node modules that the LangGraph workflow references: triage.py, investigate.py, threat_intel.py, and report.py. Each node is a function that takes InvestigationState and returns state updates.",
+    "steps": [
+      "Create sasp/agents/nodes/triage.py with a run(state: InvestigationState) -> dict function",
+      "Triage node: format detection data into a prompt, call Ollama API at AGENT_CONFIGS['triage'] endpoint, parse response for triage_decision (investigate/skip/escalate), triage_reasoning, and triage_confidence",
+      "Create sasp/agents/nodes/investigate.py with a run(state) -> dict function",
+      "Investigate node: use configured tools (splunk_query, ise_lookup, asset_lookup, baseline_query) to gather evidence, build timeline, identify affected assets/users, append results to state.evidence and state.tool_calls",
+      "Create sasp/agents/nodes/threat_intel.py with a run(state) -> dict function",
+      "Threat Intel node: call threat_intel and mitre_mapper tools, enrich with IOCs, identify threat actor if possible, map to MITRE ATT&CK techniques, update state.iocs, state.mitre_techniques, state.kill_chain_phase",
+      "Create sasp/agents/nodes/report.py with a run(state) -> dict function",
+      "Report node: synthesize all evidence into report_summary and report_full markdown, generate actionable recommendations list, set final severity and confidence scores",
+      "Create sasp/agents/nodes/__init__.py that imports all four modules",
+      "Each node must handle Ollama API errors gracefully (timeout, connection refused) with retry logic and fallback state values"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-016",
+    "category": "agents",
+    "description": "Implement the agent tool modules that investigation and threat intel nodes call to gather evidence. These are read-only query tools that wrap external API calls.",
+    "steps": [
+      "Create sasp/agents/tools/splunk_query.py: run SPL queries against Splunk REST API, return results as list of dicts. Accept: query string, earliest/latest time, max_results",
+      "Create sasp/agents/tools/ise_lookup.py: query ISE ERS API for endpoint/session data by MAC, IP, or username. Return auth history, posture status, endpoint group",
+      "Create sasp/agents/tools/asset_lookup.py: query a local JSON or SQLite asset inventory for hostname, owner, criticality, network zone by IP address",
+      "Create sasp/agents/tools/threat_intel.py: query VirusTotal, AbuseIPDB, or a local threat intel feed for IP/domain reputation. Return risk score, categories, related IOCs",
+      "Create sasp/agents/tools/baseline_query.py: compare current traffic patterns against stored baselines (hourly/daily averages) to identify deviations",
+      "Create sasp/agents/tools/mitre_mapper.py: given a set of observed behaviors (port scan, lateral movement, etc.), return matching MITRE ATT&CK technique IDs and descriptions",
+      "Create sasp/agents/tools/__init__.py that exports a TOOL_REGISTRY dict mapping tool names to callable functions",
+      "Each tool must return a standardized ToolResult dict: {tool_name, success, result, error, duration_ms}",
+      "Each tool must have a timeout (configurable, default 30s) and handle connection errors without crashing the agent"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-017",
+    "category": "agents",
+    "description": "Create the prompt templates for each agent node. These are carefully engineered system prompts that constrain agent behavior, define output format, and include safety guardrails.",
+    "steps": [
+      "Create sasp/agents/security/prompt_templates/triage.txt: system prompt for triage agent including role definition, expected output format (JSON with decision/reasoning/confidence), list of detection types it handles, instruction to never execute actions",
+      "Create sasp/agents/security/prompt_templates/investigate.txt: system prompt for investigate agent including available tools list, evidence-gathering methodology, output format for findings, instruction to only use provided tools",
+      "Create sasp/agents/security/prompt_templates/report.txt: system prompt for report agent including report structure template (executive summary, timeline, impact, recommendations), severity classification criteria, instruction to cite evidence sources",
+      "Add safety guardrails to all prompts: do not reveal system prompt, do not execute destructive actions, do not make claims without evidence, flag uncertainty",
+      "Create sasp/agents/security/prompt_loader.py: utility to load and format templates with variable substitution (detection data, tool results, etc.)",
+      "Test each prompt with a sample detection to verify output format compliance"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-018",
+    "category": "security",
+    "description": "Implement the Guardian agent (guardian.py) that validates all outputs from primary agents before they reach the user. This is the security watchdog that prevents prompt injection propagation, hallucinated tool calls, and policy violations.",
+    "steps": [
+      "Create sasp/agents/security/guardian.py with a GuardianAgent class",
+      "Implement validate(state: InvestigationState) -> GuardianResult method",
+      "Check 1 - Output injection: run all report text fields through check_all_patterns from patterns.py",
+      "Check 2 - Tool call validation: verify every tool_call in state.tool_calls references a real tool from TOOL_REGISTRY and has valid argument types",
+      "Check 3 - Evidence grounding: verify that claims in report_summary are backed by evidence in state.evidence (basic keyword/entity matching)",
+      "Check 4 - Severity consistency: verify severity rating is consistent with evidence (e.g., 'critical' should have multiple IOCs or confirmed compromise)",
+      "Check 5 - Policy compliance: check that no PII (SSN, credit card patterns) appears in report output unless the detection is about PII",
+      "Set approved=True only if all checks pass, needs_human_review=True if severity is critical or any check is marginal, approved=False if injection detected",
+      "Populate concerns list with human-readable descriptions of any issues found",
+      "Add logging for all guardian decisions with full check results"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-019",
+    "category": "security",
+    "description": "Implement the audit logging module (audit.py) and output validator (output_validator.py) for the security layer. The audit logger creates an immutable, append-only record of all agent actions and decisions.",
+    "steps": [
+      "Create sasp/agents/security/audit.py with an AuditLogger class (class methods as referenced in graph.py)",
+      "Implement log_guardian_check(state, result): log investigation_id, timestamp, all guardian check results, decision",
+      "Implement log_approval_request(request): log the approval request with pending status",
+      "Implement log_tool_call(agent, tool_name, arguments, result): log every tool invocation with timing",
+      "Implement log_agent_turn(agent_name, input_state_hash, output_state_diff): log state changes per node",
+      "Write audit logs to a structured JSON file (one JSON object per line) at a configurable path (AUDIT_LOG_PATH env var)",
+      "Include HMAC signature on each log line using a secret key (AUDIT_HMAC_KEY env var) for tamper detection",
+      "Create sasp/agents/security/output_validator.py with validate_output(text: str) -> ValidationResult",
+      "Output validator checks: max length, no raw HTML/script tags, no base64 blobs over 100 chars, no URLs to external domains unless from threat intel",
+      "Add a verify_audit_integrity(log_path) function that checks all HMAC signatures in the audit log"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-020",
+    "category": "agents",
+    "description": "Fix graph.py to work with the real node implementations and security layer. Currently graph.py imports modules that do not exist; after SASP-015, SASP-018, and SASP-019 are complete, the imports will resolve but the wiring needs verification and the human_approval node needs implementation.",
+    "steps": [
+      "Verify that all imports in graph.py resolve: .nodes.triage, .nodes.investigate, .nodes.threat_intel, .nodes.report, .security.guardian, .security.audit",
+      "Update guardian_check function to instantiate GuardianAgent with appropriate config",
+      "Implement the human_approval node: create an approval request, write it to a file or Kafka topic (approval-queue), and block/poll until approved (with configurable timeout, default 1 hour)",
+      "Add error handling to each node: if a node raises an exception, catch it, log to audit, set an error field in state, and route to a 'failed' terminal state",
+      "Add a new 'error' terminal node that logs the failure and produces a minimal error report",
+      "Update route_after_triage to handle the 'escalate' decision (route to human_approval directly, skipping investigation)",
+      "Test the compiled graph with a mock detection dict to verify the full workflow executes without import errors",
+      "Add timing instrumentation: record start_time at entry, end_time and duration_seconds at exit"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-021",
+    "category": "testing",
+    "description": "Create integration tests for the agent workflow: test the full LangGraph pipeline end-to-end with mock Ollama responses and mock tool implementations, verifying state transitions and guardian validation.",
+    "steps": [
+      "Create sasp/tests/integration/test_agent_workflow.py",
+      "Create mock fixtures: mock_ollama_response that returns canned JSON for each agent node",
+      "Create mock tool fixtures: mock_splunk_query, mock_ise_lookup, etc. that return synthetic results",
+      "Test happy path: detection -> triage(investigate) -> investigate -> threat_intel -> report -> guardian(approve) -> END",
+      "Test skip path: detection -> triage(skip) -> END",
+      "Test escalation path: detection -> triage(escalate) -> human_approval -> END",
+      "Test guardian rejection: inject a prompt injection into report output, verify guardian sets approved=False",
+      "Test guardian human review: set severity to critical, verify guardian routes to human_approval",
+      "Test error handling: simulate Ollama timeout in investigate node, verify error state is set and audit is logged",
+      "Verify audit log entries are written for all test scenarios"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-022",
+    "category": "testing",
+    "description": "Create adversarial security tests specifically targeting the LLM agent layer: prompt injection through detection data, tool result manipulation, and output exfiltration attempts.",
+    "steps": [
+      "Create sasp/tests/adversarial/test_prompt_injection.py",
+      "Test: inject 'ignore previous instructions' in a NetFlow source IP field, verify sanitizer catches it before reaching agents",
+      "Test: inject role-switch attack in syslog message field, verify triage agent does not change behavior",
+      "Test: inject data exfiltration URL in ISE username field, verify it is stripped by sanitizer",
+      "Test: craft a detection that tries to make the investigate agent call a non-existent tool, verify guardian catches the hallucinated tool call",
+      "Test: inject MITRE technique IDs that do not exist, verify threat_intel node validates technique IDs",
+      "Create sasp/tests/adversarial/test_model_evasion.py",
+      "Test: submit NetFlow data with unicode homoglyphs in IP addresses, verify sanitizer detects evasion patterns",
+      "Test: submit oversized syslog messages designed to cause DoS, verify truncation works",
+      "Add all adversarial tests under @pytest.mark.adversarial marker for separate CI execution"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-023",
+    "category": "presentation",
+    "description": "Create Splunk dashboard XML definitions for SASP investigation results. These dashboards visualize detection events, investigation outcomes, agent performance, and GPU health metrics.",
+    "steps": [
+      "Create sasp/ui/splunk_dashboards/detections.xml: real-time detection feed with severity color coding, detection type breakdown pie chart, detections-over-time timechart",
+      "Create sasp/ui/splunk_dashboards/investigations.xml: investigation timeline, evidence summary table, MITRE ATT&CK heat map, severity distribution",
+      "Create sasp/ui/splunk_dashboards/ai_health.xml: agent response times, guardian approval/rejection rates, tool call success rates, Ollama endpoint health",
+      "Create sasp/ui/splunk_dashboards/gpu_health.xml: GPU utilization, memory usage, temperature, inference throughput from Triton metrics",
+      "Add drilldown links between dashboards (e.g., click detection -> open investigation details)",
+      "Document the Splunk index and sourcetype requirements for each dashboard",
+      "Create a deploy_dashboards.sh script that uses Splunk REST API to upload dashboard XMLs"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-024",
+    "category": "presentation",
+    "description": "Build a chat interface using Gradio that allows a security analyst to interact with the SASP investigation system: view detections, ask questions about investigations, and approve/reject human-in-the-loop requests.",
+    "steps": [
+      "Create sasp/ui/chat/app.py using Gradio Blocks layout",
+      "Left panel: live detection feed (polling from Kafka or a REST endpoint) with severity badges",
+      "Center panel: chat interface where analyst can ask questions about a selected detection/investigation",
+      "Right panel: investigation details showing evidence, timeline, MITRE mapping when an investigation is selected",
+      "Implement chat handler that sends analyst questions to Ollama and includes investigation context",
+      "Add an approval/rejection interface: when human_approval is pending, show the investigation summary with Approve/Reject buttons",
+      "Add authentication (basic Gradio auth with username/password from environment variables)",
+      "Add a system status bar showing: Kafka connected, Triton healthy, Ollama reachable, pending approvals count",
+      "Create a Dockerfile for the chat interface and add it to docker-compose.s1.yml"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-025",
+    "category": "testing",
+    "description": "Create a comprehensive CI test configuration and end-to-end smoke test that verifies the entire SASP pipeline can start and process a synthetic detection from Kafka input through agent investigation to Splunk output.",
+    "steps": [
+      "Create a pytest conftest.py at sasp/tests/conftest.py with shared fixtures: sample_netflow_record, sample_syslog_record, sample_ise_record, sample_detection",
+      "Create sasp/tests/integration/test_smoke.py",
+      "Test 1: sanitizer pipeline - produce a raw netflow message to kafka, verify it appears on the sanitized topic (requires Kafka; skip if not available with pytest.mark.requires_kafka)",
+      "Test 2: detection pipeline - submit sanitized data to Triton, verify inference response (requires Triton; skip if not available)",
+      "Test 3: agent pipeline - submit a detection to run_investigation with mocked Ollama, verify complete InvestigationState is returned",
+      "Test 4: audit integrity - after test 3, verify audit log exists and all HMAC signatures are valid",
+      "Create a Makefile or justfile with targets: test-unit, test-integration, test-adversarial, test-all, lint, typecheck",
+      "Document test execution requirements in a TESTING.md file"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-026",
+    "category": "setup",
+    "description": "Create comprehensive project documentation: a CONTRIBUTING.md with development setup instructions, architecture decision records for key choices (LangGraph, Ollama, sanitizer-first design), and update the main README with accurate getting-started steps.",
+    "steps": [
+      "Update sasp/README.md Phase checklist to reflect current status (Phase 0 complete, Phase 2 injection patterns done)",
+      "Create CONTRIBUTING.md with: Python version requirements, virtual environment setup, pip install -e '.[dev,ml,agents]', pre-commit hooks for ruff",
+      "Document the multi-server deployment process: which compose file goes on which server, env var configuration, startup order",
+      "Create docs/ARCHITECTURE_DECISIONS.md covering: why LangGraph over AutoGen/CrewAI, why Ollama for air-gap, why sanitizer-before-model, why guardian-agent pattern",
+      "Add troubleshooting section for common issues: Ollama connection refused, Kafka consumer lag, Triton model loading errors, GPU OOM",
+      "Create a CHANGELOG.md with the v0.1.0 initial release entries"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-027",
+    "category": "operations",
+    "description": "Migrate kafka_bridge from Workstation (RTX 5080) to Mac Studio. Change HEALTH_PORT default to 9093 to avoid conflict with sanitizer. Add multi-topic Kafka consumption (morpheus-detections, abp-detections, sid-detections). Create startup script. Workstation becomes dev-only — power off when not actively developing.",
+    "steps": [
+      "Modify kafka_bridge.py: KAFKA_TOPIC_DETECTIONS as comma-separated list, HEALTH_PORT default 9093",
+      "Update KafkaConsumer to subscribe to *KAFKA_TOPICS (multi-topic)",
+      "Add source_topic parameter to send_to_dlq for better DLQ routing",
+      "Create scripts/start_bridge.sh startup script for Mac Studio",
+      "Install langgraph, langchain-core, openai in Mac Studio venv",
+      "Start bridge on Mac Studio, verify health on :9093",
+      "Kill old bridge on Workstation, verify stopped"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-028",
+    "category": "detection",
+    "description": "Deploy NVIDIA pre-trained ABP XGBoost model for GPU anomaly detection (crypto mining, GPU malware). Convert XGBoost BST to ONNX, create Triton config, build detector daemon that polls nvidia-smi and calls Triton inference.",
+    "steps": [
+      "Download abp-nvsmi-xgb-20230831.bst from Morpheus repo (via Git LFS media URL)",
+      "Convert XGBoost BST to ONNX using onnxmltools (requires xgboost <3.0 for legacy format)",
+      "Create Triton config: max_batch_size 0, input FP32 [-1,18], outputs label INT64 + probabilities FP32",
+      "Create abp_detector.py daemon: nvidia-smi polling, 18-feature parsing, Triton HTTP inference, Kafka output",
+      "SCP model + config to S1 /mnt/storage1/triton-models/abp-nvsmi/",
+      "Restart Triton, verify abp-nvsmi READY",
+      "Test inference with sample GPU metrics"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-029",
+    "category": "detection",
+    "description": "Deploy NVIDIA SID MiniBERT model for sensitive information detection in syslog messages. Create Triton config, build detector daemon that tokenizes syslog text with BERT tokenizer and calls Triton inference for 10-class PII detection.",
+    "steps": [
+      "Download sid-minibert-20230424.onnx (44.8MB) from Morpheus repo",
+      "Download bert-base-uncased-hash.txt (Morpheus hashed vocab, NOT standard HuggingFace)",
+      "Create Triton config: max_batch_size 32, inputs INT32 [256], output FP32 [10]",
+      "Create sid_detector.py daemon: Kafka consumer, BertWordPieceTokenizer, Triton HTTP inference, Kafka output",
+      "SCP model + vocab + config to S1 /mnt/storage1/triton-models/sid-minibert/",
+      "Restart Triton, verify sid-minibert READY",
+      "Test inference with sample tokenized input"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-030",
+    "category": "testing",
+    "description": "Create synthetic ISE authentication event generator for DFP model training. Generate realistic 802.1x/TACACS events with configurable user profiles, anomaly scenarios, time compression, and Kafka output.",
+    "steps": [
+      "Create ise_auth_generator.py with ISEAuthGenerator class",
+      "Define 13 user profiles (9 human, 3 service accounts, 1 monitoring) with distinct behavioral fingerprints",
+      "Implement 6 anomaly scenarios: brute_force, impossible_travel, new_device, off_hours, credential_stuffing, compromised_service",
+      "Generate ISE records matching sasp/sanitizer/ise.py REQUIRED_FIELDS format",
+      "Add CLI: --duration-days, --rate, --seed, --dry-run, --list, --bootstrap, --topic, --anomaly-rate",
+      "Test --dry-run output and validate events pass through ISE sanitizer"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-031",
+    "category": "presentation",
+    "description": "Create ISE Activity Splunk dashboard for monitoring authentication events, detecting brute force attacks, impossible travel, new device sightings, and other behavioral anomalies from ISE data.",
+    "steps": [
+      "Create sasp_ise index in Splunk via REST API",
+      "Create ise_activity.xml dashboard with 8 rows, 18 panels",
+      "Add KPI panels: total auths, pass rate, fail rate, unique users",
+      "Add anomaly panels: brute force, off-hours, impossible travel, new devices, credential stuffing",
+      "Add service account monitoring and DFP anomaly label panels",
+      "Update deploy_dashboards.sh to include ise_activity",
+      "Deploy dashboard to Splunk via REST API"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-032",
+    "category": "operations",
+    "description": "Deploy ABP and SID detector daemons to S1 and start them as persistent services. ABP monitors the T4 GPU via nvidia-smi, SID processes syslog messages for PII detection.",
+    "steps": [
+      "SCP abp_detector.py to S1 /home/<SERVER_USER>/sasp/",
+      "SCP sid_detector.py to S1 /home/<SERVER_USER>/sasp/",
+      "Install tokenizers package on S1 for SID BERT tokenization",
+      "Start abp_detector.py via nohup, verify health on :9094",
+      "Start sid_detector.py via nohup, verify health on :9095",
+      "Verify ABP detections appear in abp-detections Kafka topic",
+      "Verify bridge on Mac Studio picks up ABP/SID detections"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-033",
+    "category": "detection",
+    "description": "Retrain NetFlow autoencoder on properly scaled data. Current model was trained without StandardScaler, producing ~15-20% anomaly rate vs expected ~5%. Collect scaled training data from live pipeline and retrain.",
+    "steps": [
+      "Collect 24-48 hours of scaled NetFlow features from Kafka netflow-sanitized topic",
+      "Train autoencoder on scaled features using existing netflow_autoencoder.py",
+      "Compute new threshold (p95/p99) on validation set",
+      "Export retrained model to ONNX",
+      "Deploy to S1 Triton, verify model loads and anomaly rate drops to ~5%",
+      "Update scaler.json and threshold.json if needed"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-034",
+    "category": "detection",
+    "description": "Generate ISE training data and train DFP model for behavioral anomaly detection on authentication events. Use the ISE auth generator to create 30 days of synthetic data, train on normal patterns, test anomaly detection.",
+    "steps": [
+      "Run ISE generator: --duration-days 30 --rate 50 --seed 42 --bootstrap <S2_IP>:9092",
+      "Verify events flow through sanitizer to ise-sanitized topic",
+      "Extract training features from ise-sanitized data",
+      "Train DFP model on normal behavioral patterns (per-user baselines)",
+      "Evaluate anomaly detection on injected anomalous scenarios",
+      "Deploy DFP model to Triton if performance is satisfactory"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-035",
+    "category": "data-layer",
+    "description": "Wire ISE data pipeline to Splunk. Set up a Kafka consumer or HEC forwarder so ise-sanitized events flow to the sasp_ise Splunk index, populating the ISE Activity dashboard with live data.",
+    "steps": [
+      "Create ISE-to-Splunk consumer or extend bridge to consume ise-sanitized topic",
+      "Map ISE event fields to sasp:ise_auth sourcetype",
+      "Post events to Splunk HEC targeting sasp_ise index",
+      "Verify ISE Activity dashboard populates with live data",
+      "Test dashboard panels with both normal and anomalous events"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-036",
+    "category": "testing",
+    "description": "Fix 20 stale test mocks from llm_client.py refactor. Mock targets need updating to patch correct module paths after the refactor changed how requests are imported.",
+    "steps": [
+      "Audit all 16 agent workflow test failures to identify stale mock targets",
+      "Update mock patches to target correct module paths (llm_client instead of individual node modules)",
+      "Fix 3 adversarial edge cases (ZWNJ/RTL in hostname, truncation boundary)",
+      "Fix 1 feature engineering duration unit mismatch",
+      "Run make test-all, target 214/214 passing"
+    ],
+    "passes": true
+  },
+  {
+    "story": "SASP-037",
+    "category": "operations",
+    "description": "Production hardening: replace nohup-based services with systemd service files for all daemons. Add log rotation, automatic restart, and container restart policies.",
+    "steps": [
+      "Create systemd service files for: sanitizer, bridge, abp_detector, sid_detector",
+      "Create systemd service files for: gpu_metrics_collector, triton_metrics_collector, switch_metrics_nxapi",
+      "Add restart=always and watchdog health checks",
+      "Configure journald log rotation",
+      "Add Docker restart policies for sasp-triton and sasp-morpheus containers",
+      "Test recovery after simulated service crash and host reboot"
+    ],
+    "passes": true
+  }
+]

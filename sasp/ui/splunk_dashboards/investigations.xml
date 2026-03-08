@@ -1,0 +1,369 @@
+<dashboard version="1.1">
+  <label>SASP - Investigation Details</label>
+  <description>Investigation feed and drill-down details for SASP AI-driven security investigations</description>
+
+  <fieldset submitButton="false" autoRun="true">
+    <input type="text" token="investigation_id">
+      <label>Investigation ID</label>
+      <default>*</default>
+    </input>
+  </fieldset>
+
+  <!-- Row 1: KPI Strip -->
+  <row>
+    <panel>
+      <title>Investigations (24h)</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation
+| stats count</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0x006d9c","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[10,50,100]</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Avg Duration (sec)</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation
+| stats avg(duration_seconds) AS avg_duration
+| eval avg_duration=round(avg_duration, 1)</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="numberPrecision">0.0</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Guardian Approval %</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation
+| stats count(eval(guardian_approved="true")) AS approved, count AS total
+| eval pct=round(approved/total*100, 1)
+| fields pct</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="unit">%</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0xdc4e41","0xf8be34","0x53a051"]</option>
+        <option name="rangeValues">[50,80]</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Critical + High</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation (severity="critical" OR severity="high")
+| stats count</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[5,20]</option>
+      </single>
+    </panel>
+  </row>
+
+  <!-- Row 2: Investigation Feed -->
+  <row>
+    <panel>
+      <title>Investigation Feed</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| sort - _time
+| table _time investigation_id model_name source_ip dest_ip severity triage_decision score top_features guardian_approved duration_seconds
+| rename _time AS "Time", investigation_id AS "Investigation ID", model_name AS "Model", source_ip AS "Source IP", dest_ip AS "Dest IP", severity AS "Severity", triage_decision AS "Triage", score AS "Score", top_features AS "Top Features", guardian_approved AS "Guardian OK", duration_seconds AS "Duration (s)"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">row</option>
+        <option name="count">20</option>
+        <option name="wrap">false</option>
+        <drilldown>
+          <set token="investigation_id">$row.Investigation ID$</set>
+        </drilldown>
+        <format type="color" field="Severity">
+          <colorPalette type="map">{"critical":#DC4E41,"high":#F1813F,"medium":#F8BE34,"low":#53A051}</colorPalette>
+        </format>
+        <format type="color" field="Guardian OK">
+          <colorPalette type="map">{"true":#53A051,"false":#DC4E41}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 3: Full Investigation Report -->
+  <row>
+    <panel>
+      <title>Investigation Report</title>
+      <html>
+        <style>
+          .report-full { padding: 12px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; font-family: monospace; max-height: 600px; overflow-y: auto; }
+        </style>
+      </html>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| eval report=if(len(report_full)>0, report_full, report_summary)
+| table report
+| rename report AS "Investigation Report"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">1</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 4: Analysis — Triage Reasoning, MITRE, Threat Actor, Kill Chain, Severity, Confidence -->
+  <row>
+    <panel>
+      <title>Triage Reasoning</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| table triage_reasoning
+| rename triage_reasoning AS "Triage Reasoning"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">1</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+    <panel>
+      <title>MITRE ATT&amp;CK Techniques</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| spath input=mitre_techniques
+| mvexpand {}
+| rename {} AS technique
+| table technique
+| rename technique AS "MITRE Technique"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Threat Actor</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| eval threat_actor=if(isnull(threat_actor) OR threat_actor="", "N/A", threat_actor)
+| fields threat_actor</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Kill Chain Phase</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| eval kill_chain_phase=if(isnull(kill_chain_phase) OR kill_chain_phase="", "N/A", kill_chain_phase)
+| fields kill_chain_phase</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Severity</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| fields severity</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="colorBy">value</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Confidence</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| eval confidence=round(confidence, 2)
+| fields confidence</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0xdc4e41","0xf8be34","0x53a051"]</option>
+        <option name="rangeValues">[0.5,0.8]</option>
+      </single>
+    </panel>
+  </row>
+
+  <!-- Row 5: Recommendations, Affected Assets/Users -->
+  <row>
+    <panel>
+      <title>Recommendations</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| spath input=recommendations
+| mvexpand {}
+| rename {} AS recommendation
+| streamstats count AS "#"
+| table "#" recommendation
+| rename recommendation AS "Recommendation"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Affected Assets &amp; Users</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| spath input=affected_assets
+| rename {} AS asset
+| spath input=affected_users
+| rename {} AS user
+| eval assets=mvjoin(asset, ", "), users=mvjoin(user, ", ")
+| eval assets=if(isnull(assets) OR assets="", "None identified", assets)
+| eval users=if(isnull(users) OR users="", "None identified", users)
+| table assets users
+| rename assets AS "Affected Assets", users AS "Affected Users"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">1</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 6: Guardian Status with Detailed Checks -->
+  <row>
+    <panel>
+      <title>Guardian Status</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| table guardian_approved guardian_concerns
+| rename guardian_approved AS "Approved", guardian_concerns AS "Concerns"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">1</option>
+        <option name="wrap">true</option>
+        <format type="color" field="Approved">
+          <colorPalette type="map">{"true":#53A051,"false":#DC4E41}</colorPalette>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <title>Guardian Validation Checks</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| spath input=guardian_checks output=gc_keys
+| spath input=guardian_checks
+| table guardian_checks.*
+| transpose 0
+    column_name="Check"
+    header_field="column"
+| rename "row 1" AS "Result"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+        <option name="wrap">true</option>
+        <format type="color" field="Result">
+          <colorPalette type="map">{"true":#53A051,"passed":#53A051,"false":#DC4E41,"failed":#DC4E41}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 7: Detection Context + IOCs -->
+  <row>
+    <panel>
+      <title>Detection Context</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| table detection_id model_name source_ip dest_ip score username calling_station_id top_features triage_decision
+| rename detection_id AS "Detection ID", model_name AS "Model", source_ip AS "Source IP", dest_ip AS "Dest IP", score AS "Score", username AS "Username", calling_station_id AS "Calling Station", top_features AS "Top Features", triage_decision AS "Triage Decision"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">1</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Indicators of Compromise (IOCs)</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation investigation_id="$investigation_id$"
+| head 1
+| spath input=iocs
+| mvexpand {}
+| rename {} AS ioc
+| table ioc
+| rename ioc AS "IOC"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</dashboard>

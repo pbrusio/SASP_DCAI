@@ -1,0 +1,5 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY abp_detector.py sid_detector.py ise_dfp_detector.py ./
+RUN pip install --no-cache-dir requests kafka-python-ng tokenizers python-dotenv numpy
+# Entrypoint set at run time via docker run command

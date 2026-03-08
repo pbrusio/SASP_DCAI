@@ -1,0 +1,112 @@
+# SASP Morpheus Pipeline — NetFlow Anomaly Detection
+# Reads sanitized NetFlow from Kafka, runs through Triton autoencoder,
+# flags anomalies based on reconstruction error, publishes detections.
+
+pipeline:
+  name: netflow_detection
+  description: "NetFlow anomaly detection via autoencoder reconstruction error"
+
+  # --- Source: Kafka consumer ---
+  source:
+    type: from-kafka
+    properties:
+      bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:-<S2_IP>:9092}
+      input_topic: netflow-sanitized
+      group_id: morpheus-netflow-detection
+      auto_offset_reset: latest
+      poll_interval: 100ms
+
+  stages:
+    # --- Deserialize JSON messages ---
+    - type: deserialize
+      properties:
+        message_type: json
+        schema:
+          SrcAddr: string
+          DstAddr: string
+          SrcPort: int
+          DstPort: int
+          Proto: int
+          Bytes: int
+          Packets: int
+          TimeFlowStart: float
+          TimeFlowEnd: float
+
+    # --- Feature engineering / preprocessing ---
+    - type: preprocess
+      properties:
+        module: sasp.models.training.feature_engineering
+        class: NetFlowFeatureExtractor
+        scaler_path: /mnt/storage1/models/netflow-anomaly/scaler.pkl
+        feature_columns:
+          - bytes_per_packet
+          - duration_seconds
+          - src_port_category
+          - dst_port_category
+          - proto_tcp
+          - proto_udp
+          - proto_icmp
+          - proto_other
+          - bytes_total
+          - packets_total
+          - flows_per_src_ip
+          - unique_dst_ips_per_src
+          - unique_dst_ports_per_src
+          - bytes_out_vs_in_ratio
+          - dst_ip_entropy
+
+    # --- Triton inference ---
+    - type: inf-triton
+      properties:
+        model_name: netflow-anomaly
+        server_url: ${TRITON_SERVER_URL:-<S1_IP>:8001}
+        input_name: input
+        output_name: output
+        use_shared_memory: true
+
+    # --- Anomaly scoring (reconstruction error) ---
+    - type: add-scores
+      properties:
+        method: reconstruction_error
+        # Thresholds from training (see netflow_autoencoder_threshold.json)
+        threshold_95: ${NETFLOW_THRESHOLD_95:-0.05}
+        threshold_99: ${NETFLOW_THRESHOLD_99:-0.10}
+        label_column: anomaly_label
+        score_column: anomaly_score
+
+    # --- Filter: only emit anomalies ---
+    - type: filter
+      properties:
+        column: anomaly_label
+        value: anomaly
+        operator: eq
+
+    # --- Add classification metadata ---
+    - type: add-class
+      properties:
+        detection_type: netflow_anomaly
+        model_name: netflow-anomaly
+        model_version: 1
+
+    # --- Serialize output ---
+    - type: serialize
+      properties:
+        message_type: json
+        include_columns:
+          - SrcAddr
+          - DstAddr
+          - SrcPort
+          - DstPort
+          - Proto
+          - anomaly_score
+          - anomaly_label
+          - detection_type
+          - model_name
+          - timestamp
+
+  # --- Sink: Kafka producer ---
+  sink:
+    type: to-kafka
+    properties:
+      bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:-<S2_IP>:9092}
+      output_topic: morpheus-detections

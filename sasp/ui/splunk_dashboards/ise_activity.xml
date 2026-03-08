@@ -1,0 +1,515 @@
+<dashboard version="1.1">
+  <label>SASP - ISE Authentication Activity</label>
+  <description>Cisco ISE authentication patterns, user behavior baselines, and anomaly indicators for DFP model training and monitoring</description>
+
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="time_range">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="username_filter">
+      <label>Username</label>
+      <choice value="*">All Users</choice>
+      <default>*</default>
+      <search>
+        <query>index=sasp_ise sourcetype=sasp:ise_auth | dedup username | sort username | table username</query>
+        <earliest>-7d@d</earliest>
+        <latest>now</latest>
+      </search>
+      <fieldForLabel>username</fieldForLabel>
+      <fieldForValue>username</fieldForValue>
+    </input>
+    <input type="dropdown" token="policy_filter">
+      <label>Policy Set</label>
+      <choice value="*">All Policies</choice>
+      <default>*</default>
+      <search>
+        <query>index=sasp_ise sourcetype=sasp:ise_auth | dedup policy_set | sort policy_set | table policy_set</query>
+        <earliest>-7d@d</earliest>
+        <latest>now</latest>
+      </search>
+      <fieldForLabel>policy_set</fieldForLabel>
+      <fieldForValue>policy_set</fieldForValue>
+    </input>
+  </fieldset>
+
+  <!-- Row 1: Summary KPIs -->
+  <row>
+    <panel>
+      <title>Total Authentications</title>
+      <single>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| stats count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">none</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Failed Authentications</title>
+      <single>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$" auth_result=FAIL
+| stats count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[10,50]</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Unique Users</title>
+      <single>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| stats dc(username) AS unique_users</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">none</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Unique Devices</title>
+      <single>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| stats dc(calling_station_id) AS unique_devices</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">none</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Failure Rate</title>
+      <single>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| stats count(eval(auth_result="FAIL")) AS failures count AS total
+| eval failure_rate=round((failures/total)*100,1)</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[5,15]</option>
+        <option name="unit">%</option>
+        <option name="field">failure_rate</option>
+      </single>
+    </panel>
+  </row>
+
+  <!-- Row 2: Auth timeline (PASS/FAIL) + by policy -->
+  <row>
+    <panel>
+      <title>Authentication Volume — PASS vs FAIL</title>
+      <chart>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| timechart count by auth_result</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Auth Count</option>
+        <option name="charting.fieldColors">{"PASS":0x53a051,"FAIL":0xdc4e41}</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Authentication by Policy Set</title>
+      <chart>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| timechart count by policy_set</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Auth Count</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 3: User behavior heatmap + per-user failure rates -->
+  <row>
+    <panel>
+      <title>Authentication Heatmap — Hour of Day vs Day of Week</title>
+      <chart>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| eval hour=strftime(_time,"%H")
+| eval day=strftime(_time,"%A")
+| stats count by day hour
+| xyseries day hour count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleX.text">Day</option>
+        <option name="charting.axisTitleY.text">Auth Count</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Failure Rate by User (Top 15)</title>
+      <table>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth policy_set="$policy_filter$"
+| stats count AS total count(eval(auth_result="FAIL")) AS failures dc(calling_station_id) AS devices dc(nas_ip) AS locations by username
+| eval failure_pct=round((failures/total)*100,1)
+| sort - failure_pct
+| head 15
+| rename username AS "User", total AS "Total", failures AS "Failures", failure_pct AS "Fail %", devices AS "Devices", locations AS "Locations"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">row</option>
+        <option name="count">15</option>
+        <format type="color" field="Fail %">
+          <colorPalette type="list">[0x53a051,0xf8be34,0xdc4e41]</colorPalette>
+          <scale type="threshold">5,15</scale>
+        </format>
+        <drilldown>
+          <set token="username_filter">$row.User$</set>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 4: Anomaly indicators -->
+  <row>
+    <panel>
+      <title>Brute Force Indicator — Users with 10+ Failures in 5 min</title>
+      <table>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth auth_result=FAIL username="$username_filter$" policy_set="$policy_filter$"
+| bin _time span=5m
+| stats count AS failures dc(calling_station_id) AS devices values(nas_ip) AS locations by _time username
+| where failures >= 10
+| sort - _time
+| head 20
+| rename _time AS "Window", username AS "User", failures AS "Failures (5m)", devices AS "Devices", locations AS "NAS IPs"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Off-Hours Authentication (Midnight–6am, Weekdays)</title>
+      <table>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| eval hour=tonumber(strftime(_time,"%H"))
+| eval dow=tonumber(strftime(_time,"%w"))
+| where (hour >= 0 AND hour &lt; 6) AND (dow >= 1 AND dow &lt;= 5)
+| table _time username auth_result nas_ip calling_station_id policy_set
+| sort - _time
+| head 20
+| rename _time AS "Time", username AS "User", auth_result AS "Result", nas_ip AS "NAS IP", calling_station_id AS "Device", policy_set AS "Policy"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+        <format type="color" field="Result">
+          <colorPalette type="map">{"PASS":#53A051,"FAIL":#DC4E41}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 5: Device tracking + location anomalies -->
+  <row>
+    <panel>
+      <title>New Device Sightings — First-Seen MACs (Last 24h)</title>
+      <table>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$" earliest=-7d@d latest=now
+| stats earliest(_time) AS first_seen latest(_time) AS last_seen count by username calling_station_id
+| where first_seen > relative_time(now(), "-24h@h")
+| convert ctime(first_seen) ctime(last_seen)
+| sort - first_seen
+| rename username AS "User", calling_station_id AS "Device MAC", first_seen AS "First Seen", last_seen AS "Last Seen", count AS "Auth Count"</query>
+          <earliest>-7d@d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">15</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Rapid Location Changes — 2+ NAS IPs in 5 min</title>
+      <table>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| bin _time span=5m
+| stats dc(nas_ip) AS unique_locations values(nas_ip) AS nas_ips by _time username
+| where unique_locations >= 2
+| sort - _time
+| head 20
+| rename _time AS "Window", username AS "User", unique_locations AS "Locations", nas_ips AS "NAS IPs"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 6: Credential stuffing + service account monitoring -->
+  <row>
+    <panel>
+      <title>Credential Stuffing Indicator — Multiple Users from Same Device</title>
+      <table>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth policy_set="$policy_filter$"
+| bin _time span=10m
+| stats dc(username) AS unique_users values(username) AS usernames count AS attempts by _time calling_station_id
+| where unique_users >= 3
+| sort - _time
+| head 20
+| rename _time AS "Window", calling_station_id AS "Device MAC", unique_users AS "Users", usernames AS "Usernames", attempts AS "Attempts"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Service Account Anomalies — Unexpected NAS IP or High Failure</title>
+      <table>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth policy_set="Service-Accounts"
+| stats count AS total count(eval(auth_result="FAIL")) AS failures dc(nas_ip) AS unique_nas values(nas_ip) AS nas_ips latest(_time) AS last_seen by username
+| eval fail_pct=round((failures/total)*100,1)
+| where unique_nas > 1 OR fail_pct > 1
+| convert ctime(last_seen)
+| sort - fail_pct
+| rename username AS "Service Account", total AS "Total", failures AS "Failures", fail_pct AS "Fail %", unique_nas AS "NAS Count", nas_ips AS "NAS IPs", last_seen AS "Last Seen"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+        <format type="color" field="Fail %">
+          <colorPalette type="list">[0x53a051,0xf8be34,0xdc4e41]</colorPalette>
+          <scale type="threshold">1,5</scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 7: DFP ML Detections -->
+  <row>
+    <panel>
+      <title>DFP Model Detections</title>
+      <single>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="ise-dfp"
+| stats count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="colorMode">block</option>
+        <option name="useColors">true</option>
+        <option name="rangeColors">["0x53a051","0xf8be34","0xdc4e41"]</option>
+        <option name="rangeValues">[1,5]</option>
+      </single>
+    </panel>
+    <panel>
+      <title>DFP Anomaly Scores Over Time</title>
+      <chart>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="ise-dfp"
+| timechart avg(score) AS avg_score max(score) AS max_score</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Anomaly Score</option>
+        <option name="charting.fieldColors">{"avg_score":0x006D9C,"max_score":0xDC4E41}</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>DFP Detections by User</title>
+      <chart>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="ise-dfp" username="$username_filter$"
+| stats count by username
+| sort - count
+| head 15</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleX.text">User</option>
+        <option name="charting.axisTitleY.text">Detections</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Recent DFP Detections</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation model_name="ise-dfp"
+| table timestamp username score top_features severity calling_station_id source_ip report_summary
+| sort - timestamp
+| head 20
+| rename timestamp AS "Time", username AS "User", score AS "Score", top_features AS "Top Factors", severity AS "Severity", calling_station_id AS "Device", source_ip AS "NAS IP", report_summary AS "Description"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+        <format type="color" field="Severity">
+          <colorPalette type="map">{"critical":#DC4E41,"high":#F1813F,"medium":#F8BE34,"low":#53A051}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 7b: Cross-Model Correlation -->
+  <row>
+    <panel>
+      <title>Cross-Model Correlated Alerts — Same Source IP in Multiple Models (30 min window)</title>
+      <table>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation (model_name="ise-dfp" OR model_name="netflow-anomaly")
+| bin _time span=30m
+| stats dc(model_name) AS model_count values(model_name) AS models values(username) AS users max(score) AS max_score latest(top_features) AS top_factors by _time source_ip
+| where model_count > 1
+| sort - _time
+| head 20
+| rename _time AS "Window", source_ip AS "Source IP", models AS "Alert Types", users AS "Users", max_score AS "Max Score", top_factors AS "Top Factors"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+      </table>
+    </panel>
+    <panel>
+      <title>All Detection Types — Combined Timeline</title>
+      <chart>
+        <search>
+          <query>index=sasp_investigations sourcetype=sasp:investigation
+| eval alert_type=case(model_name="ise-dfp", "ISE DFP", model_name="netflow-anomaly", "NetFlow", model_name="abp-nvsmi", "GPU ABP", model_name="sid-minibert", "Syslog SID", 1=1, model_name)
+| timechart count by alert_type</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Detections</option>
+        <option name="charting.fieldColors">{"ISE DFP":0x006D9C,"NetFlow":0xF8BE34,"GPU ABP":0xDC4E41,"Syslog SID":0x53A051}</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 8: DFP anomaly labels (training validation) + auth type breakdown -->
+  <!-- (was Row 7 before DFP ML Detections row was inserted) -->
+  <row>
+    <panel>
+      <title>DFP Anomaly Labels (Training Data Validation)</title>
+      <chart>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth _anomaly_label=*
+| stats count by _anomaly_label
+| rename _anomaly_label AS "Scenario"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleX.text">Anomaly Scenario</option>
+        <option name="charting.axisTitleY.text">Event Count</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Authentication Type Breakdown</title>
+      <chart>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| stats count by auth_type
+| rename auth_type AS "Auth Type"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>NAS Port Type Distribution</title>
+      <chart>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| stats count by nas_port_type
+| rename nas_port_type AS "Port Type"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 8: Recent events table -->
+  <row>
+    <panel>
+      <title>Recent Authentication Events</title>
+      <table>
+        <search>
+          <query>index=sasp_ise sourcetype=sasp:ise_auth username="$username_filter$" policy_set="$policy_filter$"
+| table _time username auth_result auth_type nas_ip calling_station_id policy_set nas_port_type session_id _anomaly_label
+| sort - _time
+| head 100
+| rename _time AS "Time", username AS "User", auth_result AS "Result", auth_type AS "Auth Type", nas_ip AS "NAS IP", calling_station_id AS "Device MAC", policy_set AS "Policy", nas_port_type AS "Port Type", session_id AS "Session", _anomaly_label AS "Anomaly Label"</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+        <option name="wrap">true</option>
+        <format type="color" field="Result">
+          <colorPalette type="map">{"PASS":#53A051,"FAIL":#DC4E41}</colorPalette>
+        </format>
+        <format type="color" field="Anomaly Label">
+          <colorPalette type="map">{"brute_force":#DC4E41,"impossible_travel":#F1813F,"new_device":#F8BE34,"off_hours":#F8BE34,"credential_stuffing":#DC4E41,"compromised_svc":#DC4E41}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+</dashboard>
