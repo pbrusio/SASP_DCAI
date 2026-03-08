@@ -544,16 +544,14 @@ All 10 files above are implemented and deployed. See [`CHANGELOG.md`](./CHANGELO
 
 > Formal Cisco training evidence — demonstrates structured exam preparation alongside hands-on lab work.
 
-> The DCAIE course covers the **entire 300-640 blueprint** (all 4 domains, all 57 objective items).
+> Two Cisco U learning paths completed, covering the full 300-640 blueprint.
 
-| Track | Course | Completion | Post-Assessment | Blueprint Coverage (~sub-objectives) | Screenshot |
-|-------|--------|------------|-----------------|--------------------------------------|------------|
-| AI Network Architectures | DCAIE | **100%** | **84%** | ~20 sub-objectives across all 4 domains: 1.1.b-c, 1.5.a, 1.6.a/c, 2.1, 2.5, 3.1.a-d, 3.3.a-c, 4.1, 4.2, 4.3.a, 4.4 | `docs/cisco_u_progress/cisco_u_ai_network_architectures_progress.png` |
-| AI Compute and Storage | DCAIE | **100%** | — | 1.5.b-f, 2.2, 2.3, 2.4, 3.2.a-f | ✅ |
-| AI Infrastructure Operations | DCAIAOT | **100%** | — | 4.1, 4.2, 4.3.a-d, 4.4 | ✅ |
-| AI Fabric Orchestration | — | — | — | 3.3.a-d (ND, APIC, Hyperfabric, Intersight) | ⏳ |
+| Learning Path | Modules | Hours | Courses | Labs | Completion | Blueprint Coverage |
+|---------------|---------|-------|---------|------|------------|-------------------|
+| **DCAIE** — AI Solutions on Cisco Infrastructure Essentials | AI Basics, AI Infrastructure Requirements & Compliance, AI Network Architectures, AI Data Considerations, AI Hardware Resources | 33h 52m | 28 | 6 | **100%** | All 4 domains (1.0–4.0) — full blueprint |
+| **DCAIAOT** — Operate and Troubleshoot AI Solutions on Cisco Infrastructure | AI Infrastructure Operations & Monitoring, Troubleshooting AI Infrastructure, Troubleshoot Common Issues in AI/ML Fabric | 3h 38m | 3 | 1 | **100%** | Domain 4 deep-dive (4.1–4.4) |
 
-**Impact:** The DCAIE and DCAIAOT learning paths are complete, covering Domains 1-2 and Domain 4 respectively. Combined with hands-on lab work, this provides comprehensive coverage of the 300-640 blueprint. The remaining AI Fabric Orchestration track (Domain 3.3) was addressed through dCloud labs and study materials.
+**Impact:** Both learning paths are complete. DCAIE provides comprehensive coverage of the entire 300-640 blueprint across all 4 domains (28 courses, 10 assessments, 6 labs). DCAIAOT adds focused depth on Domain 4 operations and troubleshooting. Combined with the hands-on SASP lab project, this represents thorough preparation across theory, coursework, and practical implementation.
 
 ---
 
