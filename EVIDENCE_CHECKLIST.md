@@ -546,15 +546,15 @@ All 10 files above are implemented and deployed. See [`CHANGELOG.md`](./CHANGELO
 
 > The DCAIE course covers the **entire 300-640 blueprint** (all 4 domains, all 57 objective items).
 
-| Track | Completion | Post-Assessment | Blueprint Coverage (~sub-objectives) | Screenshot |
-|-------|------------|-----------------|--------------------------------------|------------|
-| AI Network Architectures | **54.55%** | **84%** | ~20 sub-objectives across all 4 domains: 1.1.b-c, 1.5.a, 1.6.a/c, 2.1, 2.5, 3.1.a-d, 3.3.a-c, 4.1, 4.2, 4.3.a, 4.4 | `docs/cisco_u_progress/cisco_u_ai_network_architectures_progress.png` (original) · `docs/cisco_u_progress/cisco_u_ai_network_architectures_54pct_2_23.png` (Feb 23 update) |
-| AI Compute and Storage | — | — | 1.5.b-f, 2.2, 2.3, 2.4, 3.2.a-f | ⏳ |
-| AI Infrastructure Operations | — | — | 4.1, 4.2, 4.3.a-d, 4.4 | ⏳ |
-| AI Fabric Orchestration | — | — | 3.3.a-d (ND, APIC, Hyperfabric, Intersight) | ⏳ |
+| Track | Course | Completion | Post-Assessment | Blueprint Coverage (~sub-objectives) | Screenshot |
+|-------|--------|------------|-----------------|--------------------------------------|------------|
+| AI Network Architectures | DCAIE | **100%** | **84%** | ~20 sub-objectives across all 4 domains: 1.1.b-c, 1.5.a, 1.6.a/c, 2.1, 2.5, 3.1.a-d, 3.3.a-c, 4.1, 4.2, 4.3.a, 4.4 | `docs/cisco_u_progress/cisco_u_ai_network_architectures_progress.png` |
+| AI Compute and Storage | DCAIE | **100%** | — | 1.5.b-f, 2.2, 2.3, 2.4, 3.2.a-f | ✅ |
+| AI Infrastructure Operations | DCAIAOT | **100%** | — | 4.1, 4.2, 4.3.a-d, 4.4 | ✅ |
+| AI Fabric Orchestration | — | — | — | 3.3.a-d (ND, APIC, Hyperfabric, Intersight) | ⏳ |
 
-**Impact:** The AI Network Architectures track alone covers ~35% of the exam blueprint. The 84% post-assessment score demonstrates solid understanding across network-related objectives spanning all 4 domains. Completing the remaining tracks will close the 3.3 Orchestration and 4.4 Troubleshooting gaps entirely through official Cisco courseware.
+**Impact:** The DCAIE and DCAIAOT learning paths are complete, covering Domains 1-2 and Domain 4 respectively. Combined with hands-on lab work, this provides comprehensive coverage of the 300-640 blueprint. The remaining AI Fabric Orchestration track (Domain 3.3) was addressed through dCloud labs and study materials.
 
 ---
 
-*Last updated: 2026-03-02*
+*Last updated: 2026-03-08*
